@@ -21,7 +21,7 @@ using namespace KODI;
 using namespace PIPEWIRE;
 
 CPipewireStream::CPipewireStream(CPipewireCore& core)
-  : m_core(core), m_streamEvents(CreateStreamEvents())
+  : m_core(core), m_streamEvents(CreateStreamEvents()), m_waiting(false), m_exiting(false)
 {
   m_stream.reset(pw_stream_new(core.Get(), nullptr, pw_properties_new(nullptr, nullptr)));
   if (!m_stream)
@@ -35,7 +35,18 @@ CPipewireStream::CPipewireStream(CPipewireCore& core)
 
 CPipewireStream::~CPipewireStream()
 {
+  using namespace std::chrono_literals;
+  auto& loop = GetCore().GetContext().GetThreadLoop();
+
   spa_hook_remove(&m_streamListener);
+
+  m_exiting = true;
+  if (m_waiting) {
+    // Process() is running, wait until it exits
+    loop.Accept();
+    while (m_waiting)
+      loop.Wait(1s);
+  }
 }
 
 bool CPipewireStream::Connect(uint32_t id,
@@ -70,7 +81,22 @@ pw_buffer* CPipewireStream::DequeueBuffer()
 
 void CPipewireStream::QueueBuffer(pw_buffer* buffer)
 {
+  auto& loop = GetCore().GetContext().GetThreadLoop();
+
   pw_stream_queue_buffer(m_stream.get(), buffer);
+
+  if (m_waiting) {
+    pw_time time = GetTime();
+    if (time.queued >= time.size) {
+      m_waiting = false;
+      loop.Accept();
+    }
+  }
+}
+
+bool CPipewireStream::NeedsData() const
+{
+  return m_waiting;
 }
 
 bool CPipewireStream::IsDriving() const
@@ -139,7 +165,17 @@ void CPipewireStream::Process(void* userdata)
   auto& stream = *reinterpret_cast<CPipewireStream*>(userdata);
   auto& loop = stream.GetCore().GetContext().GetThreadLoop();
 
-  loop.Signal(false);
+  // Block until stream has data
+  stream.m_waiting = true;
+  do {
+    if (stream.m_exiting) {
+      stream.m_waiting = false;
+      loop.Signal(false);
+      return;
+    }
+    loop.Signal(true);
+  } while (stream.m_waiting);
+
 }
 
 void CPipewireStream::Drained(void* userdata)

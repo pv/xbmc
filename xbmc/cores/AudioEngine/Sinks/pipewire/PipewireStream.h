@@ -55,6 +55,8 @@ public:
 
   pw_time GetTime() const;
 
+  bool NeedsData() const;
+
 private:
   static void StateChanged(void* userdata,
                            enum pw_stream_state old,
@@ -70,6 +72,9 @@ private:
   const pw_stream_events m_streamEvents;
 
   spa_hook m_streamListener;
+
+  bool m_waiting;
+  bool m_exiting;
 
   struct PipewireStreamDeleter
   {

@@ -43,10 +43,6 @@ public:
   pw_buffer* DequeueBuffer();
   void QueueBuffer(pw_buffer* buffer);
 
-  bool IsDriving() const;
-
-  bool TriggerProcess() const;
-
   void Flush(bool drain);
 
   uint32_t GetNodeId();
